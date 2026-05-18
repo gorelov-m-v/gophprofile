@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GophProfile Gallery</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="panel gallery-panel">
+      <div class="topbar">
+        <div class="brand-row compact">
+          <div class="brand-mark">GP</div>
+          <div>
+            <h1>Галерея</h1>
+            <p id="subtitle"></p>
+          </div>
+        </div>
+        <a class="secondary-button" href="/web/upload">Новая загрузка</a>
+      </div>
+
+      <div id="gallery" class="gallery"></div>
+      <p id="empty" class="empty" hidden>У пользователя пока нет аватарок.</p>
+      <p id="message" class="message" hidden></p>
+    </section>
+  </main>
+
+  <script>
+    const userId = decodeURIComponent(location.pathname.split('/').pop());
+    const gallery = document.querySelector('#gallery');
+    const empty = document.querySelector('#empty');
+    const message = document.querySelector('#message');
+    document.querySelector('#subtitle').textContent = userId;
+
+    function escapeHTML(value) {
+      const node = document.createElement('span');
+      node.textContent = value;
+      return node.innerHTML;
+    }
+
+    function showMessage(text, isError = false) {
+      message.textContent = text;
+      message.className = isError ? 'message error' : 'message';
+      message.hidden = false;
+    }
+
+    async function load() {
+      message.hidden = true;
+      const response = await fetch(`/api/v1/users/${encodeURIComponent(userId)}/avatars`);
+      if (!response.ok) {
+        gallery.innerHTML = '';
+        empty.hidden = true;
+        showMessage('Не удалось загрузить галерею.', true);
+        return;
+      }
+
+      const avatars = await response.json();
+      empty.hidden = avatars.length !== 0;
+      gallery.innerHTML = avatars.map((avatar) => `
+        <article class="avatar-item">
+          <img src="/api/v1/avatars/${avatar.id}?size=300x300" alt="${escapeHTML(avatar.file_name)}">
+          <div>
+            <h2>${escapeHTML(avatar.file_name)}</h2>
+            <p>${escapeHTML(avatar.mime_type)} · ${Math.round(avatar.size / 1024)} KB</p>
+            <div class="avatar-actions">
+              <a href="/api/v1/avatars/${avatar.id}/metadata">metadata</a>
+              <button class="danger-button" type="button" data-avatar-id="${avatar.id}">Удалить</button>
+            </div>
+          </div>
+        </article>
+      `).join('');
+    }
+
+    gallery.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-avatar-id]');
+      if (!button) return;
+
+      button.disabled = true;
+      const response = await fetch(`/api/v1/avatars/${button.dataset.avatarId}`, {
+        method: 'DELETE',
+        headers: { 'X-User-ID': userId },
+      });
+
+      if (!response.ok) {
+        button.disabled = false;
+        showMessage('Не удалось удалить аватарку.', true);
+        return;
+      }
+
+      await load();
+      showMessage('Аватарка удалена.');
+    });
+
+    load();
+  </script>
+</body>
+</html>

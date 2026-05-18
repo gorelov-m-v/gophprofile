@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GophProfile</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="panel upload-panel">
+      <div class="brand-row">
+        <div class="brand-mark">GP</div>
+        <div>
+          <h1>GophProfile</h1>
+          <p>Загрузка и раздача аватарок</p>
+        </div>
+      </div>
+
+      <form id="upload-form" class="form">
+        <label>
+          <span>User ID</span>
+          <input id="user-id" name="user_id" autocomplete="username" required placeholder="user-123">
+        </label>
+
+        <label class="drop-zone" id="drop-zone">
+          <input id="file" name="file" type="file" accept="image/jpeg,image/png,image/webp" required>
+          <span id="file-label">Выберите JPEG, PNG или WebP до 10 MB</span>
+        </label>
+
+        <img id="preview" class="preview" alt="Превью аватарки" hidden>
+
+        <button class="primary-button" type="submit">Загрузить</button>
+      </form>
+
+      <pre id="result" class="result" hidden></pre>
+    </section>
+  </main>
+
+  <script>
+    const form = document.querySelector('#upload-form');
+    const userId = document.querySelector('#user-id');
+    const fileInput = document.querySelector('#file');
+    const fileLabel = document.querySelector('#file-label');
+    const preview = document.querySelector('#preview');
+    const result = document.querySelector('#result');
+    const dropZone = document.querySelector('#drop-zone');
+
+    function setFile(file) {
+      if (!file) return;
+      fileLabel.textContent = `${file.name} (${Math.round(file.size / 1024)} KB)`;
+      const reader = new FileReader();
+      reader.onload = () => {
+        preview.src = reader.result;
+        preview.hidden = false;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    fileInput.addEventListener('change', () => setFile(fileInput.files[0]));
+
+    ['dragenter', 'dragover'].forEach((eventName) => {
+      dropZone.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        dropZone.classList.add('is-over');
+      });
+    });
+
+    ['dragleave', 'drop'].forEach((eventName) => {
+      dropZone.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        dropZone.classList.remove('is-over');
+      });
+    });
+
+    dropZone.addEventListener('drop', (event) => {
+      const file = event.dataTransfer.files[0];
+      if (!file) return;
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      fileInput.files = transfer.files;
+      setFile(file);
+    });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      result.hidden = true;
+
+      const data = new FormData();
+      data.append('file', fileInput.files[0]);
+
+      const response = await fetch('/api/v1/avatars', {
+        method: 'POST',
+        headers: { 'X-User-ID': userId.value.trim() },
+        body: data,
+      });
+      const payload = await response.json().catch(() => ({}));
+      result.hidden = false;
+      result.textContent = JSON.stringify(payload, null, 2);
+      result.className = response.ok ? 'result ok' : 'result error';
+      if (response.ok) {
+        setTimeout(() => {
+          window.location.href = `/web/gallery/${encodeURIComponent(userId.value.trim())}`;
+        }, 700);
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,280 @@
+:root {
+  color-scheme: light;
+  --bg: #f6f8fb;
+  --text: #16201f;
+  --muted: #5f6b7a;
+  --line: #d8dee8;
+  --panel: #ffffff;
+  --accent: #0f766e;
+  --accent-strong: #0b5f59;
+  --danger: #b42318;
+  --ok: #166534;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.shell {
+  width: min(980px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 48px 0;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 28px;
+  box-shadow: 0 20px 50px rgba(22, 32, 31, 0.08);
+}
+
+.upload-panel {
+  max-width: 620px;
+  margin: 0 auto;
+}
+
+.brand-row,
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.topbar {
+  justify-content: space-between;
+  margin-bottom: 28px;
+}
+
+.brand-row.compact h1 {
+  font-size: 28px;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  flex: 0 0 54px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  font-weight: 800;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 36px;
+  line-height: 1.1;
+}
+
+h2 {
+  font-size: 17px;
+}
+
+p {
+  color: var(--muted);
+}
+
+.form {
+  display: grid;
+  gap: 18px;
+  margin-top: 30px;
+}
+
+label {
+  display: grid;
+  gap: 8px;
+  font-weight: 700;
+}
+
+input {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 14px;
+  background: white;
+  color: var(--text);
+  font: inherit;
+}
+
+.drop-zone {
+  min-height: 118px;
+  place-items: center;
+  border: 1px dashed var(--accent);
+  border-radius: 8px;
+  background: #f3faf8;
+  color: var(--accent-strong);
+  text-align: center;
+  cursor: pointer;
+}
+
+.drop-zone input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.drop-zone.is-over {
+  background: #e7f6f2;
+}
+
+.preview {
+  width: 160px;
+  height: 160px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+
+.primary-button,
+.secondary-button,
+.danger-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 18px;
+  font: inherit;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.primary-button {
+  background: var(--accent);
+  color: white;
+}
+
+.primary-button:hover {
+  background: var(--accent-strong);
+}
+
+.secondary-button {
+  border: 1px solid var(--line);
+  background: white;
+  color: var(--text);
+}
+
+.danger-button {
+  min-height: 36px;
+  border: 1px solid #f0b8b2;
+  background: #fff5f4;
+  color: var(--danger);
+}
+
+.danger-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.result {
+  margin-top: 18px;
+  padding: 14px;
+  border-radius: 8px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.result.ok {
+  background: #ecfdf3;
+  color: var(--ok);
+}
+
+.result.error {
+  background: #fff1f0;
+  color: var(--danger);
+}
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.avatar-item {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: white;
+}
+
+.avatar-item img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #eef3f5;
+}
+
+.avatar-item a {
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.avatar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.empty {
+  padding: 22px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.message {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #ecfdf3;
+  color: var(--ok);
+}
+
+.message.error {
+  background: #fff1f0;
+  color: var(--danger);
+}
+
+@media (max-width: 640px) {
+  .shell {
+    width: min(100% - 20px, 980px);
+    padding: 20px 0;
+  }
+
+  .panel {
+    padding: 18px;
+  }
+
+  .topbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  h1 {
+    font-size: 30px;
+  }
+}
