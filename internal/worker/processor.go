@@ -110,16 +110,21 @@ func (p *Processor) RecoverPendingUploads(ctx context.Context, limit int) (int, 
 	if err != nil {
 		return 0, err
 	}
+	var errs []error
+	processed := 0
 	for _, avatar := range avatars {
 		if err := p.HandleUpload(ctx, domain.AvatarUploadEvent{
 			AvatarID: avatar.ID,
 			UserID:   avatar.UserID,
 			S3Key:    avatar.S3Key,
 		}); err != nil {
-			return 0, err
+			p.log.Warn("pending upload recovery item failed", "avatar_id", avatar.ID, "err", err)
+			errs = append(errs, err)
+			continue
 		}
+		processed++
 	}
-	return len(avatars), nil
+	return processed, errors.Join(errs...)
 }
 
 func (p *Processor) RecoverPendingDeletes(ctx context.Context, limit int) (int, error) {
@@ -127,15 +132,20 @@ func (p *Processor) RecoverPendingDeletes(ctx context.Context, limit int) (int, 
 	if err != nil {
 		return 0, err
 	}
+	var errs []error
+	processed := 0
 	for _, avatar := range avatars {
 		if err := p.HandleDelete(ctx, domain.AvatarDeleteEvent{
 			AvatarID: avatar.ID,
 			S3Keys:   avatar.S3Keys(),
 		}); err != nil {
-			return 0, err
+			p.log.Warn("pending delete recovery item failed", "avatar_id", avatar.ID, "err", err)
+			errs = append(errs, err)
+			continue
 		}
+		processed++
 	}
-	return len(avatars), nil
+	return processed, errors.Join(errs...)
 }
 
 func thumbnailKeys(thumbnails map[string]string) []string {

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorelov-m-v/gophprofile/internal/domain"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -65,5 +66,21 @@ func TestPublishRejectsNilChannel(t *testing.T) {
 	}
 	if err := r.PublishDelete(context.Background(), domain.AvatarDeleteEvent{AvatarID: "avatar-id"}); err == nil {
 		t.Fatal("expected PublishDelete error")
+	}
+}
+
+func TestEnsureMessageIDPreservesCallerID(t *testing.T) {
+	if got := ensureMessageID("event-message-id"); got != "event-message-id" {
+		t.Fatalf("message id = %q", got)
+	}
+}
+
+func TestEnsureMessageIDGeneratesMissingID(t *testing.T) {
+	got := ensureMessageID("")
+	if got == "" {
+		t.Fatal("expected generated message id")
+	}
+	if _, err := uuid.Parse(got); err != nil {
+		t.Fatalf("message id is not a uuid: %v", err)
 	}
 }

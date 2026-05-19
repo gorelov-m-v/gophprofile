@@ -79,24 +79,21 @@ func (r *RabbitMQ) DeclareTopology() error {
 }
 
 func (r *RabbitMQ) PublishUpload(ctx context.Context, event domain.AvatarUploadEvent) error {
-	if event.MessageID == "" {
-		event.MessageID = uuid.NewString()
-	}
-	return r.publish(ctx, UploadRoutingKey, event)
+	event.MessageID = ensureMessageID(event.MessageID)
+	return r.publish(ctx, UploadRoutingKey, event.MessageID, event)
 }
 
 func (r *RabbitMQ) PublishDelete(ctx context.Context, event domain.AvatarDeleteEvent) error {
-	if event.MessageID == "" {
-		event.MessageID = uuid.NewString()
-	}
-	return r.publish(ctx, DeleteRoutingKey, event)
+	event.MessageID = ensureMessageID(event.MessageID)
+	return r.publish(ctx, DeleteRoutingKey, event.MessageID, event)
 }
 
-func (r *RabbitMQ) publish(ctx context.Context, routingKey string, event any) error {
+func (r *RabbitMQ) publish(ctx context.Context, routingKey, messageID string, event any) error {
 	body, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
 	}
+	messageID = ensureMessageID(messageID)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -106,7 +103,7 @@ func (r *RabbitMQ) publish(ctx context.Context, routingKey string, event any) er
 	if err := r.channel.PublishWithContext(ctx, r.exchange, routingKey, false, false, amqp.Publishing{
 		ContentType:   "application/json",
 		DeliveryMode:  amqp.Persistent,
-		MessageId:     uuid.NewString(),
+		MessageId:     messageID,
 		CorrelationId: uuid.NewString(),
 		Headers:       amqp.Table{retryHeader: int32(0)},
 		Body:          body,
@@ -114,6 +111,13 @@ func (r *RabbitMQ) publish(ctx context.Context, routingKey string, event any) er
 		return fmt.Errorf("publish %s: %w", routingKey, err)
 	}
 	return nil
+}
+
+func ensureMessageID(messageID string) string {
+	if messageID != "" {
+		return messageID
+	}
+	return uuid.NewString()
 }
 
 func (r *RabbitMQ) Ping() error {
