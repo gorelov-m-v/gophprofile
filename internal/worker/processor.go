@@ -5,11 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorelov-m-v/gophprofile/internal/domain"
+	"github.com/gorelov-m-v/gophprofile/internal/metrics"
+	"github.com/gorelov-m-v/gophprofile/internal/observability"
 	"github.com/gorelov-m-v/gophprofile/pkg/imageutil"
 	"github.com/gorelov-m-v/gophprofile/pkg/storage"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type Repository interface {
@@ -40,7 +45,19 @@ func NewProcessor(repo Repository, store ObjectStorage, log *slog.Logger) *Proce
 	return &Processor{repo: repo, store: store, log: log}
 }
 
-func (p *Processor) HandleUpload(ctx context.Context, event domain.AvatarUploadEvent) error {
+func (p *Processor) HandleUpload(ctx context.Context, event domain.AvatarUploadEvent) (err error) {
+	started := time.Now()
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "worker.upload")
+	defer func() {
+		span.SetAttributes(
+			attribute.String("avatar_id", event.AvatarID),
+			attribute.String("user_id", event.UserID),
+			attribute.String("messaging.message_id", event.MessageID),
+		)
+		observability.EndSpan(span, err)
+		metrics.ObserveWorkerJob("upload", started, err)
+	}()
+
 	if event.AvatarID == "" || event.S3Key == "" {
 		return fmt.Errorf("%w: empty upload event fields", domain.ErrInvalidInput)
 	}
@@ -91,7 +108,19 @@ func (p *Processor) HandleUpload(ctx context.Context, event domain.AvatarUploadE
 	return nil
 }
 
-func (p *Processor) HandleDelete(ctx context.Context, event domain.AvatarDeleteEvent) error {
+func (p *Processor) HandleDelete(ctx context.Context, event domain.AvatarDeleteEvent) (err error) {
+	started := time.Now()
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "worker.delete")
+	defer func() {
+		span.SetAttributes(
+			attribute.String("avatar_id", event.AvatarID),
+			attribute.String("messaging.message_id", event.MessageID),
+			attribute.Int("s3.keys", len(event.S3Keys)),
+		)
+		observability.EndSpan(span, err)
+		metrics.ObserveWorkerJob("delete", started, err)
+	}()
+
 	if event.AvatarID == "" {
 		return fmt.Errorf("%w: empty avatar id", domain.ErrInvalidInput)
 	}
@@ -118,7 +147,7 @@ func (p *Processor) RecoverPendingUploads(ctx context.Context, limit int) (int, 
 			UserID:   avatar.UserID,
 			S3Key:    avatar.S3Key,
 		}); err != nil {
-			p.log.Warn("pending upload recovery item failed", "avatar_id", avatar.ID, "err", err)
+			p.log.WarnContext(ctx, "pending upload recovery item failed", "avatar_id", avatar.ID, "err", err)
 			errs = append(errs, err)
 			continue
 		}
@@ -139,7 +168,7 @@ func (p *Processor) RecoverPendingDeletes(ctx context.Context, limit int) (int, 
 			AvatarID: avatar.ID,
 			S3Keys:   avatar.S3Keys(),
 		}); err != nil {
-			p.log.Warn("pending delete recovery item failed", "avatar_id", avatar.ID, "err", err)
+			p.log.WarnContext(ctx, "pending delete recovery item failed", "avatar_id", avatar.ID, "err", err)
 			errs = append(errs, err)
 			continue
 		}

@@ -12,7 +12,9 @@ import (
 	"github.com/gorelov-m-v/gophprofile/internal/api"
 	"github.com/gorelov-m-v/gophprofile/internal/config"
 	"github.com/gorelov-m-v/gophprofile/internal/handlers"
+	"github.com/gorelov-m-v/gophprofile/internal/metrics"
 	"github.com/gorelov-m-v/gophprofile/internal/migrate"
+	"github.com/gorelov-m-v/gophprofile/internal/observability"
 	"github.com/gorelov-m-v/gophprofile/internal/repository"
 	"github.com/gorelov-m-v/gophprofile/internal/services"
 	"github.com/gorelov-m-v/gophprofile/pkg/broker"
@@ -20,27 +22,45 @@ import (
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	if err := run(log); err != nil {
-		log.Error("server stopped", "err", err)
+	cfg, err := config.Load(os.Args[1:])
+	if err != nil {
+		slog.New(slog.NewJSONHandler(os.Stdout, nil)).Error("load config", "err", err)
+		os.Exit(1)
+	}
+
+	log, closeLog, err := observability.NewLogger(cfg.ServiceName, cfg.LogLevel, cfg.LogFile)
+	if err != nil {
+		slog.New(slog.NewJSONHandler(os.Stdout, nil)).Error("create logger", "err", err)
+		os.Exit(1)
+	}
+	defer func() {
+		_ = closeLog()
+	}()
+
+	if err := run(cfg, log); err != nil {
+		log.ErrorContext(context.Background(), "server stopped", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(log *slog.Logger) error {
-	cfg, err := config.Load(os.Args[1:])
+func run(cfg config.Config, log *slog.Logger) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	shutdownTracing, err := observability.SetupTracing(ctx, cfg.ServiceName, cfg.OTLPEndpoint)
 	if err != nil {
 		return err
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	defer func() {
+		_ = shutdownTracing(context.Background())
+	}()
 
 	pool, err := repository.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
+	registerDatabaseMetrics(cfg.ServiceName, func() dbStatProvider { return pool.Stat() })
 
 	if err := migrate.Run(ctx, pool, cfg.MigrationsPath); err != nil {
 		return err
@@ -59,9 +79,10 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	defer rabbit.Close()
+	registerRabbitMQMetrics(cfg.ServiceName, rabbit)
 
 	repo := repository.NewAvatarRepository(pool)
-	service := services.NewAvatarService(repo, s3, rabbit, cfg.MaxUploadSize)
+	service := services.NewAvatarService(repo, s3, rabbit, cfg.MaxUploadSize).WithLogger(log)
 	handler := handlers.New(service, cfg.MaxUploadSize, cfg.WebDir)
 
 	server := &http.Server{
@@ -73,7 +94,7 @@ func run(log *slog.Logger) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("http server listening", "addr", cfg.ServerAddr)
+		log.InfoContext(ctx, "http server listening", "addr", cfg.ServerAddr)
 		errCh <- server.ListenAndServe()
 	}()
 
@@ -91,4 +112,39 @@ func run(log *slog.Logger) error {
 		}
 		return err
 	}
+}
+
+type dbStatProvider interface {
+	AcquiredConns() int32
+	IdleConns() int32
+	TotalConns() int32
+}
+
+func registerDatabaseMetrics(service string, stat func() dbStatProvider) {
+	metrics.RegisterGauge("gophprofile_db_pool_acquired_conns", "Acquired PostgreSQL pool connections.", service, func() float64 {
+		return float64(stat().AcquiredConns())
+	})
+	metrics.RegisterGauge("gophprofile_db_pool_idle_conns", "Idle PostgreSQL pool connections.", service, func() float64 {
+		return float64(stat().IdleConns())
+	})
+	metrics.RegisterGauge("gophprofile_db_pool_total_conns", "Total PostgreSQL pool connections.", service, func() float64 {
+		return float64(stat().TotalConns())
+	})
+}
+
+func registerRabbitMQMetrics(service string, rabbit *broker.RabbitMQ) {
+	metrics.RegisterGauge("gophprofile_rabbitmq_upload_queue_messages", "Ready messages in upload queue.", service, func() float64 {
+		depth, err := rabbit.QueueDepth(broker.UploadQueue)
+		if err != nil {
+			return -1
+		}
+		return float64(depth)
+	})
+	metrics.RegisterGauge("gophprofile_rabbitmq_delete_queue_messages", "Ready messages in delete queue.", service, func() float64 {
+		depth, err := rabbit.QueueDepth(broker.DeleteQueue)
+		if err != nil {
+			return -1
+		}
+		return float64(depth)
+	})
 }

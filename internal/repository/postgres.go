@@ -7,9 +7,12 @@ import (
 	"fmt"
 
 	"github.com/gorelov-m-v/gophprofile/internal/domain"
+	"github.com/gorelov-m-v/gophprofile/internal/observability"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type DB interface {
@@ -27,8 +30,13 @@ func NewAvatarRepository(db DB) *AvatarRepository {
 	return &AvatarRepository{db: db}
 }
 
-func Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
-	pool, err := pgxpool.New(ctx, dsn)
+func Connect(ctx context.Context, dsn string) (pool *pgxpool.Pool, err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "db.connect")
+	defer func() {
+		observability.EndSpan(span, err)
+	}()
+
+	pool, err = pgxpool.New(ctx, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("create postgres pool: %w", err)
 	}
@@ -39,9 +47,17 @@ func Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
-func (r *AvatarRepository) Create(ctx context.Context, a *domain.Avatar) error {
+func (r *AvatarRepository) Create(ctx context.Context, a *domain.Avatar) (err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "db.avatar.create")
+	defer func() {
+		span.SetAttributes(
+			attribute.String("avatar_id", a.ID),
+			attribute.String("user_id", a.UserID),
+		)
+		observability.EndSpan(span, err)
+	}()
+
 	var thumbs []byte
-	var err error
 	if a.ThumbnailS3Keys != nil {
 		thumbs, err = json.Marshal(a.ThumbnailS3Keys)
 		if err != nil {
@@ -62,7 +78,13 @@ func (r *AvatarRepository) Create(ctx context.Context, a *domain.Avatar) error {
 	).Scan(&a.CreatedAt, &a.UpdatedAt)
 }
 
-func (r *AvatarRepository) GetByID(ctx context.Context, id string) (*domain.Avatar, error) {
+func (r *AvatarRepository) GetByID(ctx context.Context, id string) (avatar *domain.Avatar, err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "db.avatar.get_by_id")
+	defer func() {
+		span.SetAttributes(attribute.String("avatar_id", id))
+		observability.EndSpan(span, err)
+	}()
+
 	return r.scanOne(ctx, `
 		SELECT id, user_id, file_name, mime_type, size_bytes, s3_key,
 		       thumbnail_s3_keys, width, height, upload_status, processing_status,
@@ -72,7 +94,13 @@ func (r *AvatarRepository) GetByID(ctx context.Context, id string) (*domain.Avat
 	`, id)
 }
 
-func (r *AvatarRepository) GetLatestByUserID(ctx context.Context, userID string) (*domain.Avatar, error) {
+func (r *AvatarRepository) GetLatestByUserID(ctx context.Context, userID string) (avatar *domain.Avatar, err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "db.avatar.get_latest_by_user")
+	defer func() {
+		span.SetAttributes(attribute.String("user_id", userID))
+		observability.EndSpan(span, err)
+	}()
+
 	return r.scanOne(ctx, `
 		SELECT id, user_id, file_name, mime_type, size_bytes, s3_key,
 		       thumbnail_s3_keys, width, height, upload_status, processing_status,
@@ -84,7 +112,13 @@ func (r *AvatarRepository) GetLatestByUserID(ctx context.Context, userID string)
 	`, userID)
 }
 
-func (r *AvatarRepository) ListByUserID(ctx context.Context, userID string) ([]domain.Avatar, error) {
+func (r *AvatarRepository) ListByUserID(ctx context.Context, userID string) (avatars []domain.Avatar, err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "db.avatar.list_by_user")
+	defer func() {
+		span.SetAttributes(attribute.String("user_id", userID))
+		observability.EndSpan(span, err)
+	}()
+
 	rows, err := r.db.Query(ctx, `
 		SELECT id, user_id, file_name, mime_type, size_bytes, s3_key,
 		       thumbnail_s3_keys, width, height, upload_status, processing_status,
@@ -98,7 +132,7 @@ func (r *AvatarRepository) ListByUserID(ctx context.Context, userID string) ([]d
 	}
 	defer rows.Close()
 
-	avatars := make([]domain.Avatar, 0)
+	avatars = make([]domain.Avatar, 0)
 	for rows.Next() {
 		avatar, err := scanAvatar(rows)
 		if err != nil {
@@ -112,7 +146,13 @@ func (r *AvatarRepository) ListByUserID(ctx context.Context, userID string) ([]d
 	return avatars, nil
 }
 
-func (r *AvatarRepository) ListPendingProcessing(ctx context.Context, limit int) ([]domain.Avatar, error) {
+func (r *AvatarRepository) ListPendingProcessing(ctx context.Context, limit int) (avatars []domain.Avatar, err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "db.avatar.list_pending_processing")
+	defer func() {
+		span.SetAttributes(attribute.Int("limit", limit))
+		observability.EndSpan(span, err)
+	}()
+
 	return r.list(ctx, `
 		SELECT id, user_id, file_name, mime_type, size_bytes, s3_key,
 		       thumbnail_s3_keys, width, height, upload_status, processing_status,
@@ -126,7 +166,13 @@ func (r *AvatarRepository) ListPendingProcessing(ctx context.Context, limit int)
 	`, domain.UploadStatusUploaded, domain.ProcessingStatusPending, domain.ProcessingStatusFailed, limit)
 }
 
-func (r *AvatarRepository) ListPendingCleanup(ctx context.Context, limit int) ([]domain.Avatar, error) {
+func (r *AvatarRepository) ListPendingCleanup(ctx context.Context, limit int) (avatars []domain.Avatar, err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "db.avatar.list_pending_cleanup")
+	defer func() {
+		span.SetAttributes(attribute.Int("limit", limit))
+		observability.EndSpan(span, err)
+	}()
+
 	return r.list(ctx, `
 		SELECT id, user_id, file_name, mime_type, size_bytes, s3_key,
 		       thumbnail_s3_keys, width, height, upload_status, processing_status,
@@ -139,7 +185,13 @@ func (r *AvatarRepository) ListPendingCleanup(ctx context.Context, limit int) ([
 	`, domain.CleanupStatusPending, domain.CleanupStatusFailed, limit)
 }
 
-func (r *AvatarRepository) UpdateUploadStatus(ctx context.Context, id string, status domain.UploadStatus) error {
+func (r *AvatarRepository) UpdateUploadStatus(ctx context.Context, id string, status domain.UploadStatus) (err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "db.avatar.update_upload_status")
+	defer func() {
+		span.SetAttributes(attribute.String("avatar_id", id), attribute.String("status", string(status)))
+		observability.EndSpan(span, err)
+	}()
+
 	return r.execOne(ctx, `
 		UPDATE avatars
 		SET upload_status = $2, updated_at = NOW()
@@ -147,7 +199,13 @@ func (r *AvatarRepository) UpdateUploadStatus(ctx context.Context, id string, st
 	`, id, status)
 }
 
-func (r *AvatarRepository) UpdateProcessingStatus(ctx context.Context, id string, status domain.ProcessingStatus) error {
+func (r *AvatarRepository) UpdateProcessingStatus(ctx context.Context, id string, status domain.ProcessingStatus) (err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "db.avatar.update_processing_status")
+	defer func() {
+		span.SetAttributes(attribute.String("avatar_id", id), attribute.String("status", string(status)))
+		observability.EndSpan(span, err)
+	}()
+
 	return r.execOne(ctx, `
 		UPDATE avatars
 		SET processing_status = $2, updated_at = NOW()
@@ -155,7 +213,13 @@ func (r *AvatarRepository) UpdateProcessingStatus(ctx context.Context, id string
 	`, id, status)
 }
 
-func (r *AvatarRepository) UpdateThumbnailsAndStatus(ctx context.Context, id string, thumbnails map[string]string, status domain.ProcessingStatus) error {
+func (r *AvatarRepository) UpdateThumbnailsAndStatus(ctx context.Context, id string, thumbnails map[string]string, status domain.ProcessingStatus) (err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "db.avatar.update_thumbnails")
+	defer func() {
+		span.SetAttributes(attribute.String("avatar_id", id), attribute.String("status", string(status)))
+		observability.EndSpan(span, err)
+	}()
+
 	data, err := json.Marshal(thumbnails)
 	if err != nil {
 		return fmt.Errorf("marshal thumbnails: %w", err)
@@ -167,7 +231,13 @@ func (r *AvatarRepository) UpdateThumbnailsAndStatus(ctx context.Context, id str
 	`, id, data, status)
 }
 
-func (r *AvatarRepository) SoftDelete(ctx context.Context, id string) error {
+func (r *AvatarRepository) SoftDelete(ctx context.Context, id string) (err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "db.avatar.soft_delete")
+	defer func() {
+		span.SetAttributes(attribute.String("avatar_id", id))
+		observability.EndSpan(span, err)
+	}()
+
 	return r.execOne(ctx, `
 		UPDATE avatars
 		SET deleted_at = NOW(), cleanup_status = $2, updated_at = NOW()
@@ -175,7 +245,13 @@ func (r *AvatarRepository) SoftDelete(ctx context.Context, id string) error {
 	`, id, domain.CleanupStatusPending)
 }
 
-func (r *AvatarRepository) UpdateCleanupStatus(ctx context.Context, id string, status domain.CleanupStatus) error {
+func (r *AvatarRepository) UpdateCleanupStatus(ctx context.Context, id string, status domain.CleanupStatus) (err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "db.avatar.update_cleanup_status")
+	defer func() {
+		span.SetAttributes(attribute.String("avatar_id", id), attribute.String("status", string(status)))
+		observability.EndSpan(span, err)
+	}()
+
 	return r.execOne(ctx, `
 		UPDATE avatars
 		SET cleanup_status = $2, updated_at = NOW()
@@ -183,7 +259,12 @@ func (r *AvatarRepository) UpdateCleanupStatus(ctx context.Context, id string, s
 	`, id, status)
 }
 
-func (r *AvatarRepository) Ping(ctx context.Context) error {
+func (r *AvatarRepository) Ping(ctx context.Context) (err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "db.ping")
+	defer func() {
+		observability.EndSpan(span, err)
+	}()
+
 	return r.db.Ping(ctx)
 }
 

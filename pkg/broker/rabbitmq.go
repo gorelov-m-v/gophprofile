@@ -10,7 +10,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorelov-m-v/gophprofile/internal/domain"
+	"github.com/gorelov-m-v/gophprofile/internal/observability"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 const (
@@ -88,12 +91,25 @@ func (r *RabbitMQ) PublishDelete(ctx context.Context, event domain.AvatarDeleteE
 	return r.publish(ctx, DeleteRoutingKey, event.MessageID, event)
 }
 
-func (r *RabbitMQ) publish(ctx context.Context, routingKey, messageID string, event any) error {
+func (r *RabbitMQ) publish(ctx context.Context, routingKey, messageID string, event any) (err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "rabbitmq.publish")
+	defer func() {
+		span.SetAttributes(
+			attribute.String("messaging.system", "rabbitmq"),
+			attribute.String("messaging.destination", r.exchange),
+			attribute.String("messaging.routing_key", routingKey),
+			attribute.String("messaging.message_id", messageID),
+		)
+		observability.EndSpan(span, err)
+	}()
+
 	body, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
 	}
 	messageID = ensureMessageID(messageID)
+	headers := amqp.Table{retryHeader: int32(0)}
+	otel.GetTextMapPropagator().Inject(ctx, amqpHeaderCarrier(headers))
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -105,7 +121,7 @@ func (r *RabbitMQ) publish(ctx context.Context, routingKey, messageID string, ev
 		DeliveryMode:  amqp.Persistent,
 		MessageId:     messageID,
 		CorrelationId: uuid.NewString(),
-		Headers:       amqp.Table{retryHeader: int32(0)},
+		Headers:       headers,
 		Body:          body,
 	}); err != nil {
 		return fmt.Errorf("publish %s: %w", routingKey, err)
@@ -131,6 +147,20 @@ func (r *RabbitMQ) Ping() error {
 		return fmt.Errorf("rabbitmq channel is closed")
 	}
 	return nil
+}
+
+func (r *RabbitMQ) QueueDepth(queue string) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.channel == nil {
+		return 0, fmt.Errorf("rabbitmq channel is not initialized")
+	}
+	info, err := r.channel.QueueDeclarePassive(queue, true, false, false, false, nil)
+	if err != nil {
+		return 0, fmt.Errorf("inspect queue %q: %w", queue, err)
+	}
+	return info.Messages, nil
 }
 
 func (r *RabbitMQ) Close() error {
@@ -188,8 +218,9 @@ func (r *RabbitMQ) ConsumeUploads(ctx context.Context) (<-chan UploadDelivery, e
 				_ = msg.Nack(false, false)
 				continue
 			}
+			msgCtx := otel.GetTextMapPropagator().Extract(ctx, amqpHeaderCarrier(msg.Headers))
 			delivery := UploadDelivery{
-				Context:    ctx,
+				Context:    msgCtx,
 				Event:      event,
 				RetryCount: retryCount(msg.Headers),
 				Ack:        func() error { return msg.Ack(false) },
@@ -226,8 +257,9 @@ func (r *RabbitMQ) ConsumeDeletes(ctx context.Context) (<-chan DeleteDelivery, e
 				_ = msg.Nack(false, false)
 				continue
 			}
+			msgCtx := otel.GetTextMapPropagator().Extract(ctx, amqpHeaderCarrier(msg.Headers))
 			delivery := DeleteDelivery{
-				Context:    ctx,
+				Context:    msgCtx,
 				Event:      event,
 				RetryCount: retryCount(msg.Headers),
 				Ack:        func() error { return msg.Ack(false) },
@@ -241,6 +273,35 @@ func (r *RabbitMQ) ConsumeDeletes(ctx context.Context) (<-chan DeleteDelivery, e
 		}
 	}()
 	return out, nil
+}
+
+type amqpHeaderCarrier amqp.Table
+
+func (c amqpHeaderCarrier) Get(key string) string {
+	value, ok := c[key]
+	if !ok {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case []byte:
+		return string(typed)
+	default:
+		return fmt.Sprint(typed)
+	}
+}
+
+func (c amqpHeaderCarrier) Set(key, value string) {
+	c[key] = value
+}
+
+func (c amqpHeaderCarrier) Keys() []string {
+	keys := make([]string, 0, len(c))
+	for key := range c {
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 func RetryBackoff(attempt int) time.Duration {

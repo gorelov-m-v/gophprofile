@@ -80,7 +80,10 @@ services:
         condition: service_healthy
       createbuckets:
         condition: service_completed_successfully
+      otel-collector:
+        condition: service_started
     environment:
+      SERVICE_NAME: gophprofile-server
       SERVER_ADDR: ":8080"
       DATABASE_URL: postgres://gophprofile:gophprofile@postgres:5432/gophprofile?sslmode=disable
       S3_ENDPOINT: minio:9000
@@ -91,8 +94,13 @@ services:
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       MIGRATIONS_PATH: /app/migrations
       WEB_DIR: /app/web/static
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+      LOG_LEVEL: info
+      LOG_FILE: /app/logs/server.log
     ports:
       - "8080:8080"
+    volumes:
+      - app_logs:/app/logs
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health || exit 1"]
       interval: 10s
@@ -110,6 +118,8 @@ services:
       server:
         condition: service_healthy
     environment:
+      SERVICE_NAME: gophprofile-worker
+      METRICS_ADDR: ":9091"
       DATABASE_URL: postgres://gophprofile:gophprofile@postgres:5432/gophprofile?sslmode=disable
       S3_ENDPOINT: minio:9000
       S3_ACCESS_KEY: minioadmin
@@ -118,8 +128,111 @@ services:
       S3_PUBLIC_URL: http://localhost:9000/avatars
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       MIGRATIONS_PATH: /app/migrations
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+      LOG_LEVEL: info
+      LOG_FILE: /app/logs/worker.log
+    ports:
+      - "9091:9091"
+    volumes:
+      - app_logs:/app/logs
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    container_name: gophprofile-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.100.0
+    container_name: gophprofile-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otel-collector.yaml"]
+    depends_on:
+      - jaeger
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otel-collector.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: gophprofile-alertmanager
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    volumes:
+      - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: gophprofile-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    depends_on:
+      - server
+      - worker
+      - alertmanager
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+
+  loki:
+    image: grafana/loki:2.9.8
+    container_name: gophprofile-loki
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./observability/loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki_data:/loki
+    ports:
+      - "3100:3100"
+
+  promtail:
+    image: grafana/promtail:2.9.8
+    container_name: gophprofile-promtail
+    restart: unless-stopped
+    command: ["-config.file=/etc/promtail/promtail.yml"]
+    depends_on:
+      - loki
+    volumes:
+      - ./observability/promtail/promtail.yml:/etc/promtail/promtail.yml:ro
+      - app_logs:/var/log/gophprofile:ro
+
+  grafana:
+    image: grafana/grafana:10.4.3
+    container_name: gophprofile-grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - loki
+      - jaeger
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
 
 volumes:
   postgres_data:
   minio_data:
   rabbitmq_data:
+  app_logs:
+  prometheus_data:
+  loki_data:
+  grafana_data:

@@ -9,8 +9,11 @@ import (
 	"path"
 	"strings"
 
+	"github.com/gorelov-m-v/gophprofile/internal/observability"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 const maxDownloadSize = 50 << 20
@@ -49,7 +52,13 @@ func NewS3(endpoint, accessKey, secretKey, bucket string, useSSL bool, publicURL
 	return &S3{client: client, bucket: bucket, publicURL: strings.TrimRight(publicURL, "/")}, nil
 }
 
-func (s *S3) EnsureBucket(ctx context.Context) error {
+func (s *S3) EnsureBucket(ctx context.Context) (err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "s3.ensure_bucket")
+	defer func() {
+		span.SetAttributes(attribute.String("s3.bucket", s.bucket))
+		observability.EndSpan(span, err)
+	}()
+
 	exists, err := s.client.BucketExists(ctx, s.bucket)
 	if err != nil {
 		return fmt.Errorf("check bucket: %w", err)
@@ -63,8 +72,19 @@ func (s *S3) EnsureBucket(ctx context.Context) error {
 	return nil
 }
 
-func (s *S3) Upload(ctx context.Context, key string, data []byte, contentType string) error {
-	_, err := s.client.PutObject(ctx, s.bucket, key, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{
+func (s *S3) Upload(ctx context.Context, key string, data []byte, contentType string) (err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "s3.upload")
+	defer func() {
+		span.SetAttributes(
+			attribute.String("s3.bucket", s.bucket),
+			attribute.String("s3.key", key),
+			attribute.String("content_type", contentType),
+			attribute.Int("bytes", len(data)),
+		)
+		observability.EndSpan(span, err)
+	}()
+
+	_, err = s.client.PutObject(ctx, s.bucket, key, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{
 		ContentType: contentType,
 	})
 	if err != nil {
@@ -73,7 +93,17 @@ func (s *S3) Upload(ctx context.Context, key string, data []byte, contentType st
 	return nil
 }
 
-func (s *S3) Download(ctx context.Context, key string) (Object, error) {
+func (s *S3) Download(ctx context.Context, key string) (object Object, err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "s3.download")
+	defer func() {
+		span.SetAttributes(
+			attribute.String("s3.bucket", s.bucket),
+			attribute.String("s3.key", key),
+			attribute.Int("bytes", len(object.Data)),
+		)
+		observability.EndSpan(span, err)
+	}()
+
 	info, err := s.client.StatObject(ctx, s.bucket, key, minio.StatObjectOptions{})
 	if err != nil {
 		return Object{}, fmt.Errorf("stat object %q: %w", key, err)
@@ -102,7 +132,16 @@ func (s *S3) Download(ctx context.Context, key string) (Object, error) {
 	}, nil
 }
 
-func (s *S3) Delete(ctx context.Context, key string) error {
+func (s *S3) Delete(ctx context.Context, key string) (err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "s3.delete")
+	defer func() {
+		span.SetAttributes(
+			attribute.String("s3.bucket", s.bucket),
+			attribute.String("s3.key", key),
+		)
+		observability.EndSpan(span, err)
+	}()
+
 	if key == "" {
 		return nil
 	}
@@ -112,7 +151,13 @@ func (s *S3) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-func (s *S3) DeleteMany(ctx context.Context, keys []string) error {
+func (s *S3) DeleteMany(ctx context.Context, keys []string) (err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "s3.delete_many")
+	defer func() {
+		span.SetAttributes(attribute.Int("keys", len(keys)))
+		observability.EndSpan(span, err)
+	}()
+
 	for _, key := range keys {
 		if err := s.Delete(ctx, key); err != nil {
 			return err
@@ -121,7 +166,13 @@ func (s *S3) DeleteMany(ctx context.Context, keys []string) error {
 	return nil
 }
 
-func (s *S3) Ping(ctx context.Context) error {
+func (s *S3) Ping(ctx context.Context) (err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "s3.ping")
+	defer func() {
+		span.SetAttributes(attribute.String("s3.bucket", s.bucket))
+		observability.EndSpan(span, err)
+	}()
+
 	exists, err := s.client.BucketExists(ctx, s.bucket)
 	if err != nil {
 		return err

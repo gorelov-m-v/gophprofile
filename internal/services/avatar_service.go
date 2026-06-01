@@ -6,14 +6,20 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorelov-m-v/gophprofile/internal/domain"
+	"github.com/gorelov-m-v/gophprofile/internal/metrics"
+	"github.com/gorelov-m-v/gophprofile/internal/observability"
 	"github.com/gorelov-m-v/gophprofile/pkg/imageutil"
 	"github.com/gorelov-m-v/gophprofile/pkg/storage"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 var validUserID = regexp.MustCompile(`^[A-Za-z0-9._@:-]{1,255}$`)
@@ -51,6 +57,7 @@ type AvatarService struct {
 	store         ObjectStorage
 	publisher     EventPublisher
 	maxUploadSize int64
+	log           *slog.Logger
 }
 
 func NewAvatarService(repo AvatarRepository, store ObjectStorage, publisher EventPublisher, maxUploadSize int64) *AvatarService {
@@ -59,7 +66,15 @@ func NewAvatarService(repo AvatarRepository, store ObjectStorage, publisher Even
 		store:         store,
 		publisher:     publisher,
 		maxUploadSize: maxUploadSize,
+		log:           slog.Default(),
 	}
+}
+
+func (s *AvatarService) WithLogger(log *slog.Logger) *AvatarService {
+	if log != nil {
+		s.log = log
+	}
+	return s
 }
 
 type UploadInput struct {
@@ -74,7 +89,19 @@ type ImageObject struct {
 	ETag        string
 }
 
-func (s *AvatarService) Upload(ctx context.Context, input UploadInput) (*domain.Avatar, error) {
+func (s *AvatarService) Upload(ctx context.Context, input UploadInput) (avatar *domain.Avatar, err error) {
+	started := time.Now()
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "avatar.upload")
+	defer func() {
+		span.SetAttributes(
+			attribute.String("user_id", input.UserID),
+			attribute.String("file_name", input.FileName),
+			attribute.Int("file_size", len(input.Data)),
+		)
+		observability.EndSpan(span, err)
+		metrics.ObserveUpload(input.UserID, int64(len(input.Data)), started, err)
+	}()
+
 	if err := ValidateUserID(input.UserID); err != nil {
 		return nil, err
 	}
@@ -98,7 +125,7 @@ func (s *AvatarService) Upload(ctx context.Context, input UploadInput) (*domain.
 	fileName := cleanFileName(input.FileName, mime)
 	key := fmt.Sprintf("avatars/%s/original%s", id, imageutil.ExtensionForMime(mime))
 
-	avatar := &domain.Avatar{
+	avatar = &domain.Avatar{
 		ID:               id,
 		UserID:           input.UserID,
 		FileName:         fileName,
@@ -132,10 +159,26 @@ func (s *AvatarService) Upload(ctx context.Context, input UploadInput) (*domain.
 	}); err != nil {
 		return avatar, nil
 	}
+	s.log.InfoContext(ctx, "avatar uploaded",
+		"avatar_id", avatar.ID,
+		"user_id", avatar.UserID,
+		"size_bytes", avatar.SizeBytes,
+		"mime_type", avatar.MimeType,
+	)
 	return avatar, nil
 }
 
-func (s *AvatarService) GetImage(ctx context.Context, avatarID, size, format string) (ImageObject, error) {
+func (s *AvatarService) GetImage(ctx context.Context, avatarID, size, format string) (obj ImageObject, err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "avatar.get_image")
+	defer func() {
+		span.SetAttributes(
+			attribute.String("avatar_id", avatarID),
+			attribute.String("size", size),
+			attribute.String("format", format),
+		)
+		observability.EndSpan(span, err)
+	}()
+
 	if err := ValidateAvatarID(avatarID); err != nil {
 		return ImageObject{}, err
 	}
@@ -146,7 +189,17 @@ func (s *AvatarService) GetImage(ctx context.Context, avatarID, size, format str
 	return s.objectForAvatar(ctx, avatar, size, format)
 }
 
-func (s *AvatarService) GetLatestUserImage(ctx context.Context, userID, size, format string) (ImageObject, error) {
+func (s *AvatarService) GetLatestUserImage(ctx context.Context, userID, size, format string) (obj ImageObject, err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "avatar.get_latest_user_image")
+	defer func() {
+		span.SetAttributes(
+			attribute.String("user_id", userID),
+			attribute.String("size", size),
+			attribute.String("format", format),
+		)
+		observability.EndSpan(span, err)
+	}()
+
 	if err := ValidateUserID(userID); err != nil {
 		return ImageObject{}, err
 	}
@@ -190,21 +243,42 @@ func (s *AvatarService) objectForAvatar(ctx context.Context, avatar *domain.Avat
 	return ImageObject{Data: obj.Data, ContentType: obj.ContentType, ETag: etag}, nil
 }
 
-func (s *AvatarService) GetMetadata(ctx context.Context, avatarID string) (*domain.Avatar, error) {
+func (s *AvatarService) GetMetadata(ctx context.Context, avatarID string) (avatar *domain.Avatar, err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "avatar.get_metadata")
+	defer func() {
+		span.SetAttributes(attribute.String("avatar_id", avatarID))
+		observability.EndSpan(span, err)
+	}()
+
 	if err := ValidateAvatarID(avatarID); err != nil {
 		return nil, err
 	}
 	return s.repo.GetByID(ctx, avatarID)
 }
 
-func (s *AvatarService) ListUserAvatars(ctx context.Context, userID string) ([]domain.Avatar, error) {
+func (s *AvatarService) ListUserAvatars(ctx context.Context, userID string) (avatars []domain.Avatar, err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "avatar.list_user_avatars")
+	defer func() {
+		span.SetAttributes(attribute.String("user_id", userID))
+		observability.EndSpan(span, err)
+	}()
+
 	if err := ValidateUserID(userID); err != nil {
 		return nil, err
 	}
 	return s.repo.ListByUserID(ctx, userID)
 }
 
-func (s *AvatarService) Delete(ctx context.Context, avatarID, requestUserID string) error {
+func (s *AvatarService) Delete(ctx context.Context, avatarID, requestUserID string) (err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "avatar.delete")
+	defer func() {
+		span.SetAttributes(
+			attribute.String("avatar_id", avatarID),
+			attribute.String("request_user_id", requestUserID),
+		)
+		observability.EndSpan(span, err)
+	}()
+
 	if err := ValidateAvatarID(avatarID); err != nil {
 		return err
 	}
@@ -226,10 +300,25 @@ func (s *AvatarService) Delete(ctx context.Context, avatarID, requestUserID stri
 		AvatarID:  avatarID,
 		S3Keys:    avatar.S3Keys(),
 	})
+	metrics.ObserveDelete(avatar.UserID, avatar.SizeBytes)
+	s.log.InfoContext(ctx, "avatar deleted",
+		"avatar_id", avatar.ID,
+		"user_id", avatar.UserID,
+		"size_bytes", avatar.SizeBytes,
+	)
 	return nil
 }
 
-func (s *AvatarService) DeleteLatestByUser(ctx context.Context, pathUserID, requestUserID string) error {
+func (s *AvatarService) DeleteLatestByUser(ctx context.Context, pathUserID, requestUserID string) (err error) {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "avatar.delete_latest_by_user")
+	defer func() {
+		span.SetAttributes(
+			attribute.String("path_user_id", pathUserID),
+			attribute.String("request_user_id", requestUserID),
+		)
+		observability.EndSpan(span, err)
+	}()
+
 	if pathUserID != requestUserID {
 		return domain.ErrForbidden
 	}
@@ -241,6 +330,9 @@ func (s *AvatarService) DeleteLatestByUser(ctx context.Context, pathUserID, requ
 }
 
 func (s *AvatarService) Health(ctx context.Context) map[string]string {
+	ctx, span := otel.Tracer(observability.TracerName).Start(ctx, "avatar.health")
+	defer span.End()
+
 	statuses := map[string]string{
 		"database": "ok",
 		"s3":       "ok",

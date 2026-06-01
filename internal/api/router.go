@@ -9,15 +9,19 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httprate"
 	"github.com/gorelov-m-v/gophprofile/internal/handlers"
+	"github.com/gorelov-m-v/gophprofile/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 func NewRouter(handler *handlers.Handler, webDir string) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
+	r.Use(otelhttp.NewMiddleware("http.server"))
+	r.Use(metrics.Middleware)
 	r.Use(httprate.LimitByIP(120, time.Minute))
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"},
@@ -32,6 +36,7 @@ func NewRouter(handler *handlers.Handler, webDir string) http.Handler {
 		http.Redirect(w, r, "/web/upload", http.StatusFound)
 	})
 	r.Get("/health", handler.Health)
+	r.Handle("/metrics", promhttp.Handler())
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/avatars", handler.UploadAvatar)
