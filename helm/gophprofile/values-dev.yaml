@@ -1,0 +1,16 @@
+image:
+  tag: latest
+  pullPolicy: IfNotPresent
+
+ingress:
+  hosts:
+    - host: gophprofile.local
+      paths:
+        - path: /
+          pathType: Prefix
+
+server:
+  replicas: 2
+
+worker:
+  replicas: 1

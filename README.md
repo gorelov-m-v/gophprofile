@@ -11,6 +11,7 @@ GophProfile is a Go microservice for uploading, storing, processing and serving 
 - RabbitMQ for asynchronous thumbnail and delete jobs
 - OpenTelemetry, Prometheus, Jaeger, Grafana and Loki for observability
 - Docker Compose for local development
+- Kubernetes and Helm for deployment
 
 ## API
 
@@ -47,6 +48,33 @@ Open:
 - Grafana: http://localhost:3000
 - Alertmanager: http://localhost:9093
 
+## Kubernetes
+
+Build and push the image before deploying to a cluster:
+
+```bash
+docker build -f docker/Dockerfile -t gorelov-m-v/gophprofile:latest .
+docker push gorelov-m-v/gophprofile:latest
+```
+
+Plain manifests:
+
+```bash
+kubectl apply -k k8s/base
+kubectl -n gophprofile port-forward svc/gophprofile-server 8080:80
+```
+
+Helm:
+
+```bash
+helm upgrade --install gophprofile ./helm/gophprofile \
+  --namespace gophprofile \
+  --create-namespace \
+  --values helm/gophprofile/values-dev.yaml
+```
+
+For real environments, override `secret.*`, `config.s3PublicURL`, `config.otelEndpoint` and `ingress.hosts` in a private values file. The chart creates server and worker deployments, services, ingress, HPA, ServiceMonitor, NetworkPolicy, PodDisruptionBudget, RBAC, service account and a migration hook job.
+
 Default credentials:
 
 - PostgreSQL: `gophprofile / gophprofile`
@@ -77,6 +105,9 @@ go test ./...
 go test -cover ./...
 go build ./cmd/server
 go build ./cmd/worker
+go build ./cmd/migrate
+helm lint ./helm/gophprofile
+helm template gophprofile ./helm/gophprofile --values helm/gophprofile/values-dev.yaml
 ```
 
 The server and worker both run SQL migrations on startup. The worker is idempotent: completed avatar jobs are skipped, and transient processing errors are retried with exponential backoff before the message is rejected.
@@ -90,3 +121,8 @@ The server and worker export traces through OTLP to the OpenTelemetry Collector,
 Prometheus scrapes the server and worker metrics endpoints. The Grafana dashboard `GophProfile Overview` is provisioned automatically and shows RED metrics, upload KPIs, worker jobs, storage usage, database pool usage, queue depth and application logs.
 
 Application logs are JSON slog records written to stdout and to `/app/logs/*.log`. Promtail ships those files to Loki, including `trace_id` and `span_id` labels when a log is emitted inside a trace.
+
+## Documentation
+
+- OpenAPI: `docs/openapi.yaml`
+- Architecture: `docs/architecture.md`

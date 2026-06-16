@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gophprofile.fullname" . }}-config
+  labels:
+    {{- include "gophprofile.labels" . | nindent 4 }}
+data:
+  SERVER_ADDR: {{ .Values.config.serverAddr | quote }}
+  METRICS_ADDR: {{ .Values.config.metricsAddr | quote }}
+  MIGRATIONS_PATH: {{ .Values.config.migrationsPath | quote }}
+  WEB_DIR: {{ .Values.config.webDir | quote }}
+  MAX_UPLOAD_SIZE: {{ .Values.config.maxUploadSize | quote }}
+  S3_ENDPOINT: {{ .Values.config.s3Endpoint | quote }}
+  S3_BUCKET: {{ .Values.config.s3Bucket | quote }}
+  S3_USE_SSL: {{ .Values.config.s3UseSSL | quote }}
+  S3_PUBLIC_URL: {{ .Values.config.s3PublicURL | quote }}
+  RABBITMQ_EXCHANGE: {{ .Values.config.rabbitmqExchange | quote }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.config.otelEndpoint | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}

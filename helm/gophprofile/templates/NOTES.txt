@@ -1,0 +1,10 @@
+GophProfile is installed in namespace {{ .Release.Namespace }}.
+
+HTTP service:
+  {{ include "gophprofile.fullname" . }}-server:{{ .Values.server.service.port }}
+
+Worker metrics service:
+  {{ include "gophprofile.fullname" . }}-worker:{{ .Values.worker.service.port }}
+
+Port-forward:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "gophprofile.fullname" . }}-server 8080:{{ .Values.server.service.port }}

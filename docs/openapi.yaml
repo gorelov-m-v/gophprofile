@@ -1,0 +1,417 @@
+openapi: 3.0.3
+info:
+  title: GophProfile API
+  version: 0.1.0
+  description: Avatar upload, processing and delivery service.
+servers:
+  - url: http://localhost:8080
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: One or more dependencies are unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      responses:
+        "200":
+          description: Metrics payload
+          content:
+            text/plain:
+              schema:
+                type: string
+  /api/v1/avatars:
+    post:
+      summary: Upload avatar
+      parameters:
+        - $ref: "#/components/parameters/UserIDHeader"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: Avatar accepted for processing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: File is too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TooLargeResponse"
+  /api/v1/avatars/{avatar_id}:
+    get:
+      summary: Get avatar image
+      parameters:
+        - $ref: "#/components/parameters/AvatarIDPath"
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - original
+              - 100x100
+              - 300x300
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - jpeg
+              - png
+              - webp
+      responses:
+        "200":
+          description: Image binary data
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Avatar was not found or thumbnail is not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      summary: Delete avatar
+      parameters:
+        - $ref: "#/components/parameters/AvatarIDPath"
+        - $ref: "#/components/parameters/UserIDHeader"
+      responses:
+        "204":
+          description: Avatar deleted
+        "403":
+          description: The avatar belongs to another user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Avatar was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/avatars/{avatar_id}/metadata:
+    get:
+      summary: Get avatar metadata
+      parameters:
+        - $ref: "#/components/parameters/AvatarIDPath"
+      responses:
+        "200":
+          description: Avatar metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AvatarMetadata"
+        "404":
+          description: Avatar was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/users/{user_id}/avatar:
+    get:
+      summary: Get latest user avatar
+      parameters:
+        - $ref: "#/components/parameters/UserIDPath"
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - original
+              - 100x100
+              - 300x300
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - jpeg
+              - png
+              - webp
+      responses:
+        "200":
+          description: Image binary data
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Avatar was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      summary: Delete latest user avatar
+      parameters:
+        - $ref: "#/components/parameters/UserIDPath"
+        - $ref: "#/components/parameters/UserIDHeader"
+      responses:
+        "204":
+          description: Avatar deleted
+        "403":
+          description: The avatar belongs to another user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/users/{user_id}/avatars:
+    get:
+      summary: List user avatars
+      parameters:
+        - $ref: "#/components/parameters/UserIDPath"
+      responses:
+        "200":
+          description: Avatar metadata list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AvatarMetadata"
+  /web/upload:
+    get:
+      summary: Upload form
+      responses:
+        "200":
+          description: HTML upload page
+          content:
+            text/html:
+              schema:
+                type: string
+    post:
+      summary: Upload avatar from web form
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - user_id
+                - file
+              properties:
+                user_id:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "303":
+          description: Redirect to gallery
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /web/gallery/{user_id}:
+    get:
+      summary: User gallery
+      parameters:
+        - $ref: "#/components/parameters/UserIDPath"
+      responses:
+        "200":
+          description: HTML gallery page
+          content:
+            text/html:
+              schema:
+                type: string
+components:
+  parameters:
+    AvatarIDPath:
+      name: avatar_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    UserIDPath:
+      name: user_id
+      in: path
+      required: true
+      schema:
+        type: string
+    UserIDHeader:
+      name: X-User-ID
+      in: header
+      required: true
+      schema:
+        type: string
+  schemas:
+    UploadResponse:
+      type: object
+      required:
+        - id
+        - user_id
+        - url
+        - status
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+        url:
+          type: string
+        status:
+          type: string
+          example: processing
+        created_at:
+          type: string
+          format: date-time
+    AvatarMetadata:
+      type: object
+      required:
+        - id
+        - user_id
+        - file_name
+        - mime_type
+        - size
+        - dimensions
+        - thumbnails
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+        file_name:
+          type: string
+        mime_type:
+          type: string
+        size:
+          type: integer
+          format: int64
+        dimensions:
+          $ref: "#/components/schemas/Dimensions"
+        thumbnails:
+          type: array
+          items:
+            $ref: "#/components/schemas/Thumbnail"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Dimensions:
+      type: object
+      required:
+        - width
+        - height
+      properties:
+        width:
+          type: integer
+        height:
+          type: integer
+    Thumbnail:
+      type: object
+      required:
+        - size
+        - url
+      properties:
+        size:
+          type: string
+        url:
+          type: string
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - components
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - degraded
+        components:
+          type: object
+          additionalProperties:
+            type: string
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+        details:
+          type: string
+    TooLargeResponse:
+      type: object
+      required:
+        - error
+        - max_size
+      properties:
+        error:
+          type: string
+        max_size:
+          type: integer
+          format: int64
