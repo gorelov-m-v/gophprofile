@@ -1,0 +1,26 @@
+groups:
+  - name: gophprofile
+    rules:
+      - alert: HighHTTPErrorRate
+        expr: sum(rate(gophprofile_http_requests_total{status=~"5.."}[5m])) / sum(rate(gophprofile_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High HTTP error rate
+
+      - alert: HighUploadErrorRate
+        expr: sum(rate(avatars_uploads_total{status="error"}[5m])) / sum(rate(avatars_uploads_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High avatar upload error rate
+
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, sum by (le) (rate(gophprofile_http_request_duration_seconds_bucket[5m]))) > 2
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: High p95 HTTP response time

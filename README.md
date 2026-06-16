@@ -9,6 +9,7 @@ GophProfile is a Go microservice for uploading, storing, processing and serving 
 - PostgreSQL for avatar metadata
 - MinIO/S3 for image files
 - RabbitMQ for asynchronous thumbnail and delete jobs
+- OpenTelemetry, Prometheus, Jaeger, Grafana and Loki for observability
 - Docker Compose for local development
 
 ## API
@@ -22,6 +23,7 @@ GET    /api/v1/users/{user_id}/avatar
 GET    /api/v1/users/{user_id}/avatars
 DELETE /api/v1/users/{user_id}/avatar
 GET    /health
+GET    /metrics
 ```
 
 Uploads require `X-User-ID` and a multipart field named `file` or `image`. JPEG, PNG and WebP are accepted up to 10 MB, with an additional guard against oversized image dimensions.
@@ -37,14 +39,20 @@ docker compose up --build
 Open:
 
 - Web UI: http://localhost:8080/ or http://localhost:8080/web/upload
+- Prometheus metrics: http://localhost:8080/metrics
 - MinIO console: http://localhost:9001
 - RabbitMQ console: http://localhost:15672
+- Jaeger traces: http://localhost:16686
+- Prometheus: http://localhost:9090
+- Grafana: http://localhost:3000
+- Alertmanager: http://localhost:9093
 
 Default credentials:
 
 - PostgreSQL: `gophprofile / gophprofile`
 - MinIO: `minioadmin / minioadmin`
 - RabbitMQ: `guest / guest`
+- Grafana: `admin / admin`
 
 ## Curl Examples
 
@@ -74,3 +82,11 @@ go build ./cmd/worker
 The server and worker both run SQL migrations on startup. The worker is idempotent: completed avatar jobs are skipped, and transient processing errors are retried with exponential backoff before the message is rejected.
 
 Migrations use a PostgreSQL advisory lock so concurrent server/worker startup does not race. RabbitMQ is still the primary async path, while the worker also periodically scans PostgreSQL for uploaded avatars or deleted avatars whose broker event was missed and recovers those jobs.
+
+## Observability
+
+The server and worker export traces through OTLP to the OpenTelemetry Collector, which forwards them to Jaeger. HTTP requests, service methods, PostgreSQL operations, S3 operations and RabbitMQ publish/consume flows are traced with context propagation through AMQP headers.
+
+Prometheus scrapes the server and worker metrics endpoints. The Grafana dashboard `GophProfile Overview` is provisioned automatically and shows RED metrics, upload KPIs, worker jobs, storage usage, database pool usage, queue depth and application logs.
+
+Application logs are JSON slog records written to stdout and to `/app/logs/*.log`. Promtail ships those files to Loki, including `trace_id` and `span_id` labels when a log is emitted inside a trace.

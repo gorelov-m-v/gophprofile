@@ -9,7 +9,9 @@ import (
 )
 
 type Config struct {
+	ServiceName      string
 	ServerAddr       string
+	MetricsAddr      string
 	ReadTimeout      time.Duration
 	WriteTimeout     time.Duration
 	ShutdownTimeout  time.Duration
@@ -25,11 +27,16 @@ type Config struct {
 	RabbitMQExchange string
 	WebDir           string
 	MaxUploadSize    int64
+	OTLPEndpoint     string
+	LogLevel         string
+	LogFile          string
 }
 
 func Default() Config {
 	return Config{
+		ServiceName:      "gophprofile",
 		ServerAddr:       ":8080",
+		MetricsAddr:      ":9091",
 		ReadTimeout:      10 * time.Second,
 		WriteTimeout:     30 * time.Second,
 		ShutdownTimeout:  10 * time.Second,
@@ -45,13 +52,18 @@ func Default() Config {
 		RabbitMQExchange: "avatars.exchange",
 		WebDir:           "web/static",
 		MaxUploadSize:    10 << 20,
+		OTLPEndpoint:     "",
+		LogLevel:         "info",
+		LogFile:          "",
 	}
 }
 
 func Load(args []string) (Config, error) {
 	cfg := Default()
 
+	cfg.ServiceName = envString("SERVICE_NAME", cfg.ServiceName)
 	cfg.ServerAddr = envString("SERVER_ADDR", cfg.ServerAddr)
+	cfg.MetricsAddr = envString("METRICS_ADDR", cfg.MetricsAddr)
 	cfg.ReadTimeout = envDuration("HTTP_READ_TIMEOUT", cfg.ReadTimeout)
 	cfg.WriteTimeout = envDuration("HTTP_WRITE_TIMEOUT", cfg.WriteTimeout)
 	cfg.ShutdownTimeout = envDuration("HTTP_SHUTDOWN_TIMEOUT", cfg.ShutdownTimeout)
@@ -67,9 +79,14 @@ func Load(args []string) (Config, error) {
 	cfg.RabbitMQExchange = envString("RABBITMQ_EXCHANGE", cfg.RabbitMQExchange)
 	cfg.WebDir = envString("WEB_DIR", cfg.WebDir)
 	cfg.MaxUploadSize = envInt64("MAX_UPLOAD_SIZE", cfg.MaxUploadSize)
+	cfg.OTLPEndpoint = envString("OTEL_EXPORTER_OTLP_ENDPOINT", cfg.OTLPEndpoint)
+	cfg.LogLevel = envString("LOG_LEVEL", cfg.LogLevel)
+	cfg.LogFile = envString("LOG_FILE", cfg.LogFile)
 
 	fs := flag.NewFlagSet("gophprofile", flag.ContinueOnError)
+	fs.StringVar(&cfg.ServiceName, "service-name", cfg.ServiceName, "service name for observability")
 	fs.StringVar(&cfg.ServerAddr, "addr", cfg.ServerAddr, "HTTP listen address")
+	fs.StringVar(&cfg.MetricsAddr, "metrics-addr", cfg.MetricsAddr, "metrics HTTP listen address")
 	fs.StringVar(&cfg.DatabaseURL, "database-url", cfg.DatabaseURL, "PostgreSQL DSN")
 	fs.StringVar(&cfg.MigrationsPath, "migrations-path", cfg.MigrationsPath, "directory with SQL migrations")
 	fs.StringVar(&cfg.S3Endpoint, "s3-endpoint", cfg.S3Endpoint, "S3-compatible endpoint")
@@ -82,6 +99,9 @@ func Load(args []string) (Config, error) {
 	fs.StringVar(&cfg.RabbitMQExchange, "rabbitmq-exchange", cfg.RabbitMQExchange, "RabbitMQ exchange")
 	fs.StringVar(&cfg.WebDir, "web-dir", cfg.WebDir, "static web directory")
 	fs.Int64Var(&cfg.MaxUploadSize, "max-upload-size", cfg.MaxUploadSize, "maximum upload size in bytes")
+	fs.StringVar(&cfg.OTLPEndpoint, "otel-endpoint", cfg.OTLPEndpoint, "OTLP gRPC endpoint")
+	fs.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log level")
+	fs.StringVar(&cfg.LogFile, "log-file", cfg.LogFile, "optional JSON log file")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
