@@ -62,8 +62,10 @@ func run(cfg config.Config, log *slog.Logger) error {
 	defer pool.Close()
 	registerDatabaseMetrics(cfg.ServiceName, func() dbStatProvider { return pool.Stat() })
 
-	if err := migrate.Run(ctx, pool, cfg.MigrationsPath); err != nil {
-		return err
+	if cfg.RunMigrations {
+		if err := migrate.Run(ctx, pool, cfg.MigrationsPath); err != nil {
+			return err
+		}
 	}
 
 	s3, err := storage.NewS3(cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3UseSSL, cfg.S3PublicURL)

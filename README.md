@@ -75,6 +75,8 @@ helm upgrade --install gophprofile ./helm/gophprofile \
 
 For real environments, override `secret.*`, `config.s3PublicURL`, `config.otelEndpoint` and `ingress.hosts` in a private values file. The chart creates server and worker deployments, services, ingress, HPA, ServiceMonitor, NetworkPolicy, PodDisruptionBudget, RBAC, service account and a migration hook job.
 
+In Kubernetes, schema migrations are executed by the `/app/migrate` job. Server and worker pods receive `RUN_MIGRATIONS=false`, so rollout does not start competing migration attempts from application replicas.
+
 Default credentials:
 
 - PostgreSQL: `gophprofile / gophprofile`
@@ -110,9 +112,9 @@ helm lint ./helm/gophprofile
 helm template gophprofile ./helm/gophprofile --values helm/gophprofile/values-dev.yaml
 ```
 
-The server and worker both run SQL migrations on startup. The worker is idempotent: completed avatar jobs are skipped, and transient processing errors are retried with exponential backoff before the message is rejected.
+For local Docker Compose development, startup migrations remain enabled by default and use a PostgreSQL advisory lock. In Kubernetes, migrations are handled by a dedicated job and disabled in server and worker pods.
 
-Migrations use a PostgreSQL advisory lock so concurrent server/worker startup does not race. RabbitMQ is still the primary async path, while the worker also periodically scans PostgreSQL for uploaded avatars or deleted avatars whose broker event was missed and recovers those jobs.
+The worker is idempotent: completed avatar jobs are skipped, and transient processing errors are retried with exponential backoff before the message is rejected. RabbitMQ is still the primary async path, while the worker also periodically scans PostgreSQL for uploaded avatars or deleted avatars whose broker event was missed and recovers those jobs.
 
 ## Observability
 

@@ -8,6 +8,7 @@ data:
   SERVER_ADDR: {{ .Values.config.serverAddr | quote }}
   METRICS_ADDR: {{ .Values.config.metricsAddr | quote }}
   MIGRATIONS_PATH: {{ .Values.config.migrationsPath | quote }}
+  RUN_MIGRATIONS: {{ .Values.config.runMigrations | quote }}
   WEB_DIR: {{ .Values.config.webDir | quote }}
   MAX_UPLOAD_SIZE: {{ .Values.config.maxUploadSize | quote }}
   S3_ENDPOINT: {{ .Values.config.s3Endpoint | quote }}

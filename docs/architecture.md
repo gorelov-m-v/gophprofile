@@ -7,6 +7,8 @@ flowchart LR
     client["Client or web browser"] --> ingress["Ingress"]
     ingress --> serverSvc["gophprofile-server Service"]
     serverSvc --> serverPods["Server Deployment"]
+    helmHook["Helm migration hook"] --> migrateJob["Migration Job"]
+    migrateJob --> postgres["PostgreSQL"]
     serverPods --> postgres["PostgreSQL"]
     serverPods --> minio["MinIO or S3"]
     serverPods --> rabbitmq["RabbitMQ"]
@@ -24,6 +26,21 @@ flowchart LR
     prometheus --> grafana["Grafana"]
     logs["JSON stdout logs"] --> loki["Loki or cluster log collector"]
     loki --> grafana
+    hpa["HorizontalPodAutoscaler"] -.-> serverPods
+    hpa -.-> workerPods
+    networkPolicy["NetworkPolicy"] -.-> serverPods
+    networkPolicy -.-> workerPods
+    pdb["PodDisruptionBudget"] -.-> serverPods
+    pdb -.-> workerPods
+    serviceAccount["ServiceAccount and RBAC"] -.-> serverPods
+    serviceAccount -.-> workerPods
+    serviceAccount -.-> migrateJob
+    configMap["ConfigMap"] -.-> serverPods
+    configMap -.-> workerPods
+    configMap -.-> migrateJob
+    secret["Secret"] -.-> serverPods
+    secret -.-> workerPods
+    secret -.-> migrateJob
 ```
 
 ## Request Flow

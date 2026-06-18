@@ -16,8 +16,9 @@ func TestLoadAppliesEnvAndFlags(t *testing.T) {
 	t.Setenv("RABBITMQ_URL", "amqp://env")
 	t.Setenv("HTTP_READ_TIMEOUT", "3s")
 	t.Setenv("MAX_UPLOAD_SIZE", "42")
+	t.Setenv("RUN_MIGRATIONS", "false")
 
-	cfg, err := Load([]string{"-addr", ":9090", "-s3-use-ssl=false"})
+	cfg, err := Load([]string{"-addr", ":9090", "-s3-use-ssl=false", "-run-migrations=true"})
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -36,6 +37,9 @@ func TestLoadAppliesEnvAndFlags(t *testing.T) {
 	}
 	if cfg.MaxUploadSize != 42 {
 		t.Fatalf("MaxUploadSize = %d", cfg.MaxUploadSize)
+	}
+	if !cfg.RunMigrations {
+		t.Fatal("flag should override RUN_MIGRATIONS")
 	}
 }
 
