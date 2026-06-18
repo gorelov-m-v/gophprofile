@@ -17,6 +17,7 @@ type Config struct {
 	ShutdownTimeout  time.Duration
 	DatabaseURL      string
 	MigrationsPath   string
+	RunMigrations    bool
 	S3Endpoint       string
 	S3AccessKey      string
 	S3SecretKey      string
@@ -42,6 +43,7 @@ func Default() Config {
 		ShutdownTimeout:  10 * time.Second,
 		DatabaseURL:      "postgres://gophprofile:gophprofile@localhost:5432/gophprofile?sslmode=disable",
 		MigrationsPath:   "migrations",
+		RunMigrations:    true,
 		S3Endpoint:       "localhost:9000",
 		S3AccessKey:      "minioadmin",
 		S3SecretKey:      "minioadmin",
@@ -69,6 +71,7 @@ func Load(args []string) (Config, error) {
 	cfg.ShutdownTimeout = envDuration("HTTP_SHUTDOWN_TIMEOUT", cfg.ShutdownTimeout)
 	cfg.DatabaseURL = firstNonEmpty(os.Getenv("DATABASE_URL"), os.Getenv("DB_URL"), cfg.DatabaseURL)
 	cfg.MigrationsPath = envString("MIGRATIONS_PATH", cfg.MigrationsPath)
+	cfg.RunMigrations = envBool("RUN_MIGRATIONS", cfg.RunMigrations)
 	cfg.S3Endpoint = envString("S3_ENDPOINT", cfg.S3Endpoint)
 	cfg.S3AccessKey = firstNonEmpty(os.Getenv("S3_ACCESS_KEY"), os.Getenv("S3_KEY"), cfg.S3AccessKey)
 	cfg.S3SecretKey = firstNonEmpty(os.Getenv("S3_SECRET_KEY"), os.Getenv("S3_SECRET"), cfg.S3SecretKey)
@@ -89,6 +92,7 @@ func Load(args []string) (Config, error) {
 	fs.StringVar(&cfg.MetricsAddr, "metrics-addr", cfg.MetricsAddr, "metrics HTTP listen address")
 	fs.StringVar(&cfg.DatabaseURL, "database-url", cfg.DatabaseURL, "PostgreSQL DSN")
 	fs.StringVar(&cfg.MigrationsPath, "migrations-path", cfg.MigrationsPath, "directory with SQL migrations")
+	fs.BoolVar(&cfg.RunMigrations, "run-migrations", cfg.RunMigrations, "run SQL migrations on service startup")
 	fs.StringVar(&cfg.S3Endpoint, "s3-endpoint", cfg.S3Endpoint, "S3-compatible endpoint")
 	fs.StringVar(&cfg.S3AccessKey, "s3-access-key", cfg.S3AccessKey, "S3 access key")
 	fs.StringVar(&cfg.S3SecretKey, "s3-secret-key", cfg.S3SecretKey, "S3 secret key")

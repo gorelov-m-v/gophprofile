@@ -1,0 +1,27 @@
+image:
+  pullPolicy: IfNotPresent
+
+config:
+  s3PublicURL: https://avatars.example.com/avatars
+  logLevel: info
+
+server:
+  replicas: 3
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+
+worker:
+  replicas: 2
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+
+ingress:
+  hosts:
+    - host: gophprofile.example.com
+      paths:
+        - path: /
+          pathType: Prefix
